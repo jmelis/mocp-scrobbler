@@ -2,8 +2,6 @@
 
 require 'rubygems'
 require 'scrobbler'
-require 'daemons'
-require 'pp'
 
 # http://www.last.fm/api/submissions
 # http://scrobbler.rubyforge.org/docs/
@@ -15,7 +13,7 @@ require 'pp'
 AUTHFILE='authfile'
 
 # poll interval
-POLL_INTERVAL=10
+POLL_INTERVAL=1
 
 # debug (don't do the actual scrobbling)
 DEBUG = true
@@ -122,7 +120,7 @@ end
 mocp = MocpScrobbler.new
 
 while true
-    sleep POLL_INTERVAL
     mocp.poll
+    sleep POLL_INTERVAL
 end
 
