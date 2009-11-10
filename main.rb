@@ -2,6 +2,7 @@
 
 require 'rubygems'
 require 'scrobbler'
+require 'daemons'
 require 'pp'
 
 # http://www.last.fm/api/submissions
@@ -15,12 +16,19 @@ AUTHFILE='authfile'
 
 # poll interval
 POLL_INTERVAL=10
+
+# debug (don't do the actual scrobbling)
+DEBUG = true
 #############################
 
 class MocpScrobbler
     attr_reader :fileinfo
 
     def initialize
+        connect if !defined? DEBUG
+    end
+
+    def connect
         (login,password) = File.new(AUTHFILE).readlines[0].chomp.split(':')
         @auth = Scrobbler::SimpleAuth.new(:user => login, :password => password)
         @auth.handshake!
@@ -42,17 +50,17 @@ class MocpScrobbler
                 @fileinfo = fileinfo_poll
                 puts "now playing: " + @fileinfo['SongTitle']
                 @time_start = Time.now
-                submit_now_playing
+                submit_now_playing if !defined? DEBUG
             else
                 if changed(fileinfo_poll)
                     if submit_allowed
-                        submit_scrobble
+                        submit_scrobble if !defined? DEBUG
                         puts "scrobble: " + @fileinfo['SongTitle']
                     end
                     @time_start = Time.now
                     @fileinfo = fileinfo_poll
                     puts "now playing: " + @fileinfo['SongTitle']
-                    submit_now_playing
+                    submit_now_playing if !defined? DEBUG
                 else
                     @fileinfo = fileinfo_poll
                 end
