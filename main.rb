@@ -43,18 +43,18 @@ class Track
         @track_number = track_hash[:track_number] || '' 
         @time = Time.now
         @currentsec = track_hash[:currentsec]
-
-        log "Listening to #{@file}"
     end
 
     def submittable?
-        if !has_tags
+        if !has_tags?
             log "#{@file} has no tags"
             return false
         end
 
-        totalsec = @totalsec.to_i
+        totalsec = @length.to_i
         currentsec = @currentsec.to_i
+
+        log "TotalSec: #{totalsec.to_s}, CurrentSec: #{currentsec.to_s}, HalfSec: #{(totalsec/2).to_s}"
 
         if totalsec <= 30
             log "song shorter that 30s"
@@ -64,21 +64,26 @@ class Track
         if currentsec >= 240 or currentsec >= totalsec/2
             return true
         else
-            log "you have not reaced 240s or half of the song"
+            log "you have not reached 240s or half of the song"
             return false
         end
     end
 
-    def update_currentsec(currentsec)
-       @currentsec = currentsec 
-       log "CurrentSec: #{@currentsec}, TotalSec: #{@length}"
+    def has_tags?
+        tags = [@artist, @album, @track]
+        tags.each {|t| return false if t.empty? }
+        true
     end
 
-    def ==(file)
-        @file == file
+    def update_currentsec(track)
+       @currentsec = track.currentsec 
     end
 
-    def to_s
+    def ==(track)
+        @file == track.file
+    end
+
+    def display
         info = @file + "\n"
         info += "Artist: " + @artist + "\n"
         info += "Album: " + @album + "\n"
@@ -112,33 +117,59 @@ module ScrobblerClient
     end
 
     def submit_now_playing(track)
-        playing = Scrobbler::Playing.new(:session_id => @auth.session_id,
-                                     :now_playing_url => @auth.now_playing_url,
-                                     :artist        => @fileinfo['Artist'],
-                                     :track         => @fileinfo['SongTitle'],
-                                     :album         => @fileinfo['Album'],
-                                     :length        => @fileinfo['TotalSec'],
-                                     :track_number  => '')
-
-        playing.submit!
+        log "actually submitting the now_playing!"
+        #playing = Scrobbler::Playing.new(:session_id => @auth.session_id,
+        #                             :now_playing_url => @auth.now_playing_url,
+        #                             :artist        => @fileinfo['Artist'],
+        #                             :track         => @fileinfo['SongTitle'],
+        #                             :album         => @fileinfo['Album'],
+        #                             :length        => @fileinfo['TotalSec'],
+        #                             :track_number  => '')
+        #playing.submit!
     end
 
     def submit_scrobble(track)
-        scrobble = Scrobbler::Scrobble.new(:session_id => @auth.session_id,
-                                       :submission_url => @auth.submission_url,
-                                       :artist        => @fileinfo['Artist'],
-                                       :track         => @fileinfo['SongTitle'],
-                                       :album         => @fileinfo['Album'],
-                                       :time          => @time_start,
-                                       :length        => @fileinfo['TotalSec'],
-                                       :track_number => '')
-        scrobble.submit!
+        log "actually doing the scroblle!"
+        #scrobble = Scrobbler::Scrobble.new(:session_id => @auth.session_id,
+        #                               :submission_url => @auth.submission_url,
+        #                               :artist        => @fileinfo['Artist'],
+        #                               :track         => @fileinfo['SongTitle'],
+        #                               :album         => @fileinfo['Album'],
+        #                               :time          => @time_start,
+        #                               :length        => @fileinfo['TotalSec'],
+        #                               :track_number => '')
+        #scrobble.submit!
     end
 
 
     def poll
-        
+        if server_running?
+            track = get_track
+            if !@currentTrack
+                @currentTrack = track    
+
+                if @currentTrack.has_tags?
+                    log "updating now playing: #{@currentTrack.track}"
+                    submit_now_playing if !@config[:debug] and 
+                else
+                    log "artist
+                end
+            else
+                if @currentTrack == track
+                    @currentTrack.update_currentsec(track)
+                else
+                    if @currentTrack.submittable?
+                        log "scrobbling #{@currentTrack.track}"
+                    end
+                    @currentTrack = track
+                    log "now playing #{@currentTrack.track}"
+                end
+            end
+        else
+           log "server stopped" 
+        end
     end
+
 end
 
 
@@ -167,11 +198,16 @@ class MocpScrobbler
 
          Track.new(track_hash)
     end
+
+    def server_running?
+        state = `mocp -i`.split("\n").select{|el| el =~ /^State: /}.first.split(': ')[1]
+        state != 'STOP'
+    end
 end
 
 mocp = MocpScrobbler.new
 
 while true
-    pp mocp.get_track
+    mocp.poll
     sleep POLL_INTERVAL
 end
