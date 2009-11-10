@@ -17,138 +17,161 @@ AUTHFILE='authfile'
 POLL_INTERVAL=1
 
 # debug (don't do the actual scrobbling)
-# DEBUG = true
+DEBUG = true
 
 # log to file
 # OUTPUT = 'mocp-scrobbler.log'
 #############################
 
+def log(str)
+    if defined? OUTPUT
+        @logfile.write(str+"\n")
+    else
+        puts str
+    end
+end
 
-class MocpScrobbler
-    attr_reader :fileinfo
+class Track
+    attr_reader :file, :artist, :track, :album, :length, :track_number, :time, :currentsec, :submittable
 
-    def initialize
-        connect if !defined? DEBUG
-        @logfile = File.open(OUTPUT,'a') if defined? OUTPUT
+    def initialize(track_hash)
+        @file   = track_hash[:file]
+        @artist = track_hash[:artist] || ''
+        @track  = track_hash[:track] || ''
+        @album  = track_hash[:album] || ''
+        @length = track_hash[:length]
+        @track_number = track_hash[:track_number] || '' 
+        @time = Time.now
+        @currentsec = track_hash[:currentsec]
+
+        log "Listening to #{@file}"
     end
 
-    def log(str)
-        if defined? OUTPUT
-            @logfile.write(str+"\n")
-        else
-            puts str
+    def submittable?
+        if !has_tags
+            log "#{@file} has no tags"
+            return false
         end
-    end
 
-    def connect
-        #(login,password) = File.new(AUTHFILE).readlines[0].chomp.split(':')
-        #@auth = Scrobbler::SimpleAuth.new(:user => login, :password => password)
-        #@auth.handshake!
-    end
-
-    def get_fileinfo
-        fileinfo = Hash.new
-        `mocp -i`.split("\n").each do |l| 
-            (k,v) = l.split(': ')
-            if v.class != String
-                v = String.new
-            end
-            fileinfo[k] = v.strip
-        end
-        fileinfo
-    end
-
-    def poll
-        fileinfo_poll = get_fileinfo
-
-        if fileinfo_poll['State'] != 'STOP'
-            # If we have just started @fileinfo should be empty
-            if !@fileinfo
-                # now playing submission
-                @fileinfo = fileinfo_poll
-                log "now playing: " + @fileinfo['SongTitle']
-                @time_start = Time.now
-                submit_now_playing if !defined? DEBUG
-            else
-                if changed(fileinfo_poll)
-                    if submit_allowed
-                        submit_scrobble if !defined? DEBUG
-                        log "scrobble: " + @fileinfo['SongTitle']
-                    end
-                    @time_start = Time.now
-                    @fileinfo = fileinfo_poll
-                    submit_now_playing if !defined? DEBUG
-                else
-                    @fileinfo = fileinfo_poll
-                end
-            end
-        else
-            log "server status STOP"
-        end
-    end
-
-
-    def changed(fileinfo_poll)
-        fileinfo_poll['File'] != @fileinfo['File']
-    end
-
-    def submit_allowed
- #{totalsec.to_s}, CurrentSec: #{currentsec.to_s}, HalfSec: #{(totalsec/2).to_s}"
+        totalsec = @totalsec.to_i
+        currentsec = @currentsec.to_i
 
         if totalsec <= 30
             log "song shorter that 30s"
-            log "no scrobbling allowed"
             return false
         end
 
         if currentsec >= 240 or currentsec >= totalsec/2
             return true
         else
-            log "no scrobbling allowed"
+            log "you have not reaced 240s or half of the song"
             return false
         end
     end
 
-    def has_tags
-        fields = %w(Artist SongTitle Album)
-        fields.each {|f| return false if @fileinfo[f].empty? }
-        true
+    def update_currentsec(currentsec)
+       @currentsec = currentsec 
+       log "CurrentSec: #{@currentsec}, TotalSec: #{@length}"
     end
 
-    def submit_now_playing
-        if !has_tags
-            log "#{fileinfo['File']} has no tags"
-        else
-            #playing = Scrobbler::Playing.new(:session_id => @auth.session_id,
-            #                             :now_playing_url => @auth.now_playing_url,
-            #                             :artist        => @fileinfo['Artist'],
-            #                             :track         => @fileinfo['SongTitle'],
-            #                             :album         => @fileinfo['Album'],
-            #                             :length        => @fileinfo['TotalSec'],
-            #                             :track_number  => '')
+    def ==(file)
+        @file == file
+    end
 
-            #playing.submit!
-            log "now playing: " + @fileinfo['SongTitle']
+    def to_s
+        info = @file + "\n"
+        info += "Artist: " + @artist + "\n"
+        info += "Album: " + @album + "\n"
+        info += "Track: " + @track + "\n"
+        puts info
+    end
+end
+
+module ScrobblerClient
+    def initialize
+        @config = get_config
+        connect if !@config[:debug]
+        @logfile = File.open(OUTPUT,'a') if @config[:output]
+    end
+
+    def get_config
+        config = Hash.new
+        config[:debug] = defined? DEBUG ? DEBUG : false
+        config[:output] = defined? OUTPUT ? OUTPUT : false
+        config[:poll_interval] = POLL_INTERVAL
+        config[:authfile] = AUTHFILE
+        config
+    end
+    
+    
+    def connect
+        log "Connecting!"
+        (login,password) = File.new(@config[:authfile]).readlines[0].chomp.split(':')
+        @auth = Scrobbler::SimpleAuth.new(:user => login, :password => password)
+        @auth.handshake!
+    end
+
+    def submit_now_playing(track)
+        playing = Scrobbler::Playing.new(:session_id => @auth.session_id,
+                                     :now_playing_url => @auth.now_playing_url,
+                                     :artist        => @fileinfo['Artist'],
+                                     :track         => @fileinfo['SongTitle'],
+                                     :album         => @fileinfo['Album'],
+                                     :length        => @fileinfo['TotalSec'],
+                                     :track_number  => '')
+
+        playing.submit!
+    end
+
+    def submit_scrobble(track)
+        scrobble = Scrobbler::Scrobble.new(:session_id => @auth.session_id,
+                                       :submission_url => @auth.submission_url,
+                                       :artist        => @fileinfo['Artist'],
+                                       :track         => @fileinfo['SongTitle'],
+                                       :album         => @fileinfo['Album'],
+                                       :time          => @time_start,
+                                       :length        => @fileinfo['TotalSec'],
+                                       :track_number => '')
+        scrobble.submit!
+    end
+
+
+    def poll
+        
+    end
+end
+
+
+class MocpScrobbler
+    include ScrobblerClient
+
+    def get_track
+        fileinfo = Hash.new
+        `mocp -i`.split("\n").each do |l| 
+            (k,v) = l.split(': ')
+            if v.class != String
+                v = String.new
+            end
+            fileinfo[k.intern] = v.strip
         end
-    end
 
-    def submit_scrobble
-        #scrobble = Scrobbler::Scrobble.new(:session_id => @auth.session_id,
-        #                               :submission_url => @auth.submission_url,
-        #                               :artist        => @fileinfo['Artist'],
-        #                               :track         => @fileinfo['SongTitle'],
-        #                               :album         => @fileinfo['Album'],
-        #                               :time          => @time_start,
-        #                               :length        => @fileinfo['TotalSec'],
-        #                               :track_number => '')
-        #scrobble.submit!
+        track_hash = {
+            :file => fileinfo[:File],
+            :artist => fileinfo[:Artist],
+            :track => fileinfo[:SongTitle],
+            :album => fileinfo[:Album],
+            :length => fileinfo[:TotalSec],
+            :track_number => '',
+            :currentsec => fileinfo[:CurrentSec]
+         }
+
+         Track.new(track_hash)
     end
 end
 
 mocp = MocpScrobbler.new
 
 while true
-    mocp.poll
+    pp mocp.get_track
     sleep POLL_INTERVAL
 end
-
